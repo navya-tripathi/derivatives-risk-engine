@@ -1,250 +1,322 @@
 import sys
 from pathlib import Path
 
-# Add parent directory (project root) to path
-PROJECT_ROOT = Path(__file__).resolve().parent  # This is the dashboard folder
-if str(PROJECT_ROOT.parent) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT.parent))  # Add derivatives-risk-engine
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 import streamlit as st
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('Agg')
+
+from src.black_scholes import BlackScholes
+from src.portfolio import OptionsPortfolio
+from src.gbm import GBMSimulator
+from src.monte_carlo import MonteCarloPricer
+from src.stress_testing import StressTester
 
 st.set_page_config(page_title="Derivatives Risk Engine", layout="wide")
-st.title("📊 Derivatives Risk Engine Dashboard")
-st.markdown("Interactive options pricing, Greeks, IV surface, and portfolio risk analysis")
+st.title("Derivatives Risk Engine")
+st.markdown("Interactive options pricing, Greeks, portfolio risk, and stress testing")
 
-# ========== TABS ==========
-tab = st.tabs([
-    "Black-Scholes Pricing",
-    "Greeks & Sensitivities",
-    "Implied Volatility Surface",
+tabs = st.tabs([
+    "Option Pricer",
+    "Greeks",
     "Portfolio Risk",
     "Stress Testing",
-    "Delta-Hedging Simulation",
-    "Heston Model"
+    "Delta-Hedging"
 ])
 
-# ========== TAB 1: BLACK-SCHOLES PRICING ==========
-with tab[0]:
-    st.header("Black-Scholes Option Pricing")
-    
-    with st.sidebar:
-        S = st.number_input("Spot Price (S)", value=100.0, min_value=0.01, step=0.1)
-        K = st.number_input("Strike Price (K)", value=100.0, min_value=0.01, step=0.1)
-        T = st.number_input("Time to Expiry (years)", value=0.25, min_value=0.01, step=0.01)
-        r = st.number_input("Risk-free Rate", value=0.03, min_value=-0.1, step=0.001)
-        sigma = st.number_input("Volatility", value=0.20, min_value=0.01, step=0.001)
-        option_type = st.radio("Option Type", ["Call", "Put"])
-    
-    from src.black_scholes import BlackScholes
-    bs = BlackScholes(S, K, T, r, sigma, q=0.0)
-    
-    price = bs.call_price() if option_type == "Call" else bs.put_price()
-    
-    st.metric(f"{option_type} Price", f"${price:.4f}")
-    
-    # Plot price vs strike
-    strikes = np.linspace(S * 0.5, S * 1.5, 100)
-    prices = [bs.call_price() if option_type == "Call" else bs.put_price() for K in strikes]
-    
-    fig, ax = plt.subplots(figsize=(10, 6))
-    ax.plot(strikes, prices, linewidth=2)
-    ax.axvline(S, color='red', linestyle='--', label='Spot')
-    ax.set_xlabel('Strike')
-    ax.set_ylabel('Price')
-    ax.set_title(f'{option_type} Price vs Strike')
-    ax.legend()
-    ax.grid(True)
-    st.pyplot(fig)
+# ── TAB 1: OPTION PRICER ──────────────────────────────────────────────────────
+with tabs[0]:
+    st.header("Black-Scholes Option Pricer")
 
-# ========== TAB 2: GREEKS & SENSITIVITIES ==========
-with tab[1]:
-    st.header("Option Greeks")
-    
-    with st.sidebar:
-        S = st.number_input("Spot Price (S)", value=100.0, min_value=0.01, step=0.1)
-        K = st.number_input("Strike Price (K)", value=100.0, min_value=0.01, step=0.1)
-        T = st.number_input("Time to Expiry (years)", value=0.25, min_value=0.01, step=0.01)
-        r = st.number_input("Risk-free Rate", value=0.03, min_value=-0.1, step=0.001)
-        sigma = st.number_input("Volatility", value=0.20, min_value=0.01, step=0.001)
-        option_type = st.radio("Option Type", ["Call", "Put"])
-    
-    from src.black_scholes import BlackScholes
-    bs = BlackScholes(S, K, T, r, sigma, q=0.0)
-    
-    greeks = bs.greeks()
-    
-    st.subheader("Greeks Values")
-    greeks_df = pd.DataFrame({
-        "Greek": ["Delta", "Gamma", "Vega", "Theta", "Rho"],
-        "Value": [greeks['delta'], greeks['gamma'], greeks['vega'], greeks['theta'], greeks['rho']]
-    })
-    st.dataframe(greeks_df, hide_index=True)
-    
-    # Plot delta vs spot
-    spots = np.linspace(S * 0.5, S * 1.5, 100)
-    deltas = [bs.delta(option_type_style) for spot in spots]
-    
-    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-    axes[0].plot(spots, deltas, linewidth=2, color='steelblue')
-    axes[0].axvline(S, color='red', linestyle='--', lw=2)
-    axes[0].set_xlabel('Spot Price')
-    axes[0].set_ylabel('Delta')
-    axes[0].set_title('Delta vs Spot')
-    axes[0].grid(True)
-    
-    # Plot gamma vs spot
-    gammas = [bs.gamma() for spot in spots]
-    axes[1].plot(spots, gammas, linewidth=2, color='darkorange')
-    axes[1].axvline(S, color='red', linestyle='--', lw=2)
-    axes[1].set_xlabel('Spot Price')
-    axes[1].set_ylabel('Gamma')
-    axes[1].set_title('Gamma vs Spot')
-    axes[1].grid(True)
-    
-    st.pyplot(fig)
+    col1, col2 = st.columns([1, 2])
 
-# ========== TAB 3: IMPLIED VOLATILITY SURFACE ==========
-with tab[2]:
-    st.header("Implied Volatility Surface")
-    st.markdown("Real SPY options data with volatility smile")
-    
-    from src.implied_vol import ImpliedVolSurface
-    from src.utils import get_spot
-    
-    S = get_spot("SPY")
-    st.metric("SPY Spot", f"${S:.2f}")
-    
-    if st.button("Load SPY IV Surface"):
-        with st.spinner("Loading options data..."):
-            import yfinance as yf
-            from datetime import datetime
-            
-            t = yf.Ticker("SPY")
-            all_expiries = t.options
-            
-            today = datetime.today().date()
-            future_expiries = [exp for exp in all_expiries 
-                             if datetime.strptime(str(exp), '%Y-%m-%d').date() > today]
-            
-            expiries = future_expiries[:4]
-            
-            iv_surface = ImpliedVolSurface("SPY", expiry_dates=expiries, rate=0.03)
-            surface_df = iv_surface.build_surface()
-            surface_df = surface_df.dropna(subset=['iv'])
-            
-            st.subheader("IV Surface Data")
-            st.dataframe(surface_df.head(20))
-            
-            # Plot volatility smile
-            fig, ax = plt.subplots(figsize=(10, 6))
-            for expiry in expiries:
-                subset = surface_df[surface_df['expiry'] == expiry].sort_values('moneyness')
-                if len(subset) > 0:
-                    ax.plot(subset['moneyness'], subset['iv'], marker='o', label=str(expiry)[:10], linewidth=2)
-            
-            ax.set_xlabel('Moneyness (K/S)')
-            ax.set_ylabel('Implied Volatility')
-            ax.set_title('SPY Volatility Smile')
-            ax.legend()
-            ax.grid(True)
-            st.pyplot(fig)
+    with col1:
+        S1 = st.number_input("Spot Price", value=741.75, min_value=0.01, step=1.0, key="s1")
+        K1 = st.number_input("Strike Price", value=741.75, min_value=0.01, step=1.0, key="k1")
+        T1 = st.number_input("Time to Expiry (years)", value=0.25, min_value=0.001, step=0.01, key="t1")
+        r1 = st.number_input("Risk-free Rate", value=0.03, min_value=-0.1, step=0.001, key="r1")
+        sigma1 = st.number_input("Volatility", value=0.17, min_value=0.001, step=0.01, key="sig1")
+        otype1 = st.radio("Option Type", ["call", "put"], key="otype1")
 
-# ========== TAB 4: PORTFOLIO RISK ==========
-with tab[3]:
-    st.header("Portfolio-Level Risk Aggregation")
-    
-    from src.portfolio import OptionsPortfolio
-    
+    with col2:
+        bs1 = BlackScholes(S1, K1, T1, r1, sigma1, q=0.0)
+        price = bs1.call_price() if otype1 == "call" else bs1.put_price()
+        delta = bs1.delta(otype1)
+        gamma = bs1.gamma()
+        vega  = bs1.vega()
+        theta = bs1.theta(otype1)
+
+        m1, m2, m3, m4, m5 = st.columns(5)
+        m1.metric("Price", f"${price:.4f}")
+        m2.metric("Delta", f"{delta:.4f}")
+        m3.metric("Gamma", f"{gamma:.4f}")
+        m4.metric("Vega",  f"{vega:.2f}")
+        m5.metric("Theta", f"{theta:.2f}")
+
+        # Price vs Strike chart
+        strikes = np.linspace(S1 * 0.7, S1 * 1.3, 100)
+        prices  = [
+            BlackScholes(S1, k, T1, r1, sigma1).call_price()
+            if otype1 == "call"
+            else BlackScholes(S1, k, T1, r1, sigma1).put_price()
+            for k in strikes
+        ]
+
+        fig, ax = plt.subplots(figsize=(8, 4))
+        ax.plot(strikes, prices, linewidth=2, color='steelblue')
+        ax.axvline(S1, color='red', linestyle='--', label='Spot', linewidth=1.5)
+        ax.axvline(K1, color='green', linestyle='--', label='Strike', linewidth=1.5)
+        ax.set_xlabel('Strike')
+        ax.set_ylabel('Option Price')
+        ax.set_title(f'{otype1.capitalize()} Price vs Strike')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        st.pyplot(fig)
+        plt.close(fig)
+
+        # P&L diagram at expiry
+        spots_expiry = np.linspace(S1 * 0.7, S1 * 1.3, 200)
+        if otype1 == "call":
+            payoff = np.maximum(spots_expiry - K1, 0) - price
+        else:
+            payoff = np.maximum(K1 - spots_expiry, 0) - price
+
+        fig2, ax2 = plt.subplots(figsize=(8, 3))
+        ax2.plot(spots_expiry, payoff, linewidth=2, color='darkorange')
+        ax2.axhline(0, color='black', linewidth=0.8)
+        ax2.axvline(S1, color='red', linestyle='--', linewidth=1.5, label='Spot')
+        ax2.fill_between(spots_expiry, payoff, 0,
+                         where=(payoff > 0), alpha=0.3, color='green', label='Profit')
+        ax2.fill_between(spots_expiry, payoff, 0,
+                         where=(payoff < 0), alpha=0.3, color='red', label='Loss')
+        ax2.set_xlabel('Spot at Expiry')
+        ax2.set_ylabel('P&L')
+        ax2.set_title('Payoff Diagram at Expiry')
+        ax2.legend()
+        ax2.grid(True, alpha=0.3)
+        st.pyplot(fig2)
+        plt.close(fig2)
+
+# ── TAB 2: GREEKS ─────────────────────────────────────────────────────────────
+with tabs[1]:
+    st.header("Greeks Sensitivity Analysis")
+
+    col1, col2 = st.columns([1, 2])
+
+    with col1:
+        S2     = st.number_input("Spot Price", value=741.75, step=1.0, key="s2")
+        K2     = st.number_input("Strike Price", value=741.75, step=1.0, key="k2")
+        T2     = st.number_input("Time to Expiry (years)", value=0.25, step=0.01, key="t2")
+        r2     = st.number_input("Risk-free Rate", value=0.03, step=0.001, key="r2")
+        sigma2 = st.number_input("Volatility", value=0.17, step=0.01, key="sig2")
+        otype2 = st.radio("Option Type", ["call", "put"], key="otype2")
+
+    with col2:
+        spots = np.linspace(S2 * 0.7, S2 * 1.3, 100)
+
+        deltas = [BlackScholes(s, K2, T2, r2, sigma2).delta(otype2) for s in spots]
+        gammas = [BlackScholes(s, K2, T2, r2, sigma2).gamma() for s in spots]
+        vegas  = [BlackScholes(s, K2, T2, r2, sigma2).vega() for s in spots]
+        thetas = [BlackScholes(s, K2, T2, r2, sigma2).theta(otype2) for s in spots]
+
+        fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+
+        axes[0,0].plot(spots, deltas, color='steelblue', lw=2)
+        axes[0,0].axvline(S2, color='red', linestyle='--', lw=1.5)
+        axes[0,0].set_title('Delta vs Spot')
+        axes[0,0].set_ylabel('Delta')
+        axes[0,0].grid(True, alpha=0.3)
+
+        axes[0,1].plot(spots, gammas, color='darkorange', lw=2)
+        axes[0,1].axvline(S2, color='red', linestyle='--', lw=1.5)
+        axes[0,1].set_title('Gamma vs Spot')
+        axes[0,1].set_ylabel('Gamma')
+        axes[0,1].grid(True, alpha=0.3)
+
+        axes[1,0].plot(spots, vegas, color='green', lw=2)
+        axes[1,0].axvline(S2, color='red', linestyle='--', lw=1.5)
+        axes[1,0].set_title('Vega vs Spot')
+        axes[1,0].set_ylabel('Vega')
+        axes[1,0].set_xlabel('Spot Price')
+        axes[1,0].grid(True, alpha=0.3)
+
+        axes[1,1].plot(spots, thetas, color='purple', lw=2)
+        axes[1,1].axvline(S2, color='red', linestyle='--', lw=1.5)
+        axes[1,1].set_title('Theta vs Spot')
+        axes[1,1].set_ylabel('Theta')
+        axes[1,1].set_xlabel('Spot Price')
+        axes[1,1].grid(True, alpha=0.3)
+
+        plt.tight_layout()
+        st.pyplot(fig)
+        plt.close(fig)
+
+# ── TAB 3: PORTFOLIO RISK ─────────────────────────────────────────────────────
+with tabs[2]:
+    st.header("Portfolio Risk Dashboard")
+    st.markdown("Sample 13-position portfolio — long calls, puts, spreads, straddles, short straddle")
+
+    S3     = st.number_input("Spot (SPY)", value=741.75, step=1.0, key="s3")
+    r3     = st.number_input("Risk-free Rate", value=0.03, step=0.001, key="r3")
+    sigma3 = st.number_input("Volatility", value=0.17, step=0.01, key="sig3")
+
     portfolio = OptionsPortfolio()
-    
-    st.subheader("Add Position")
-    with st.form("add_position"):
-        S = st.number_input("Spot", value=100.0)
-        K = st.number_input("Strike", value=100.0)
-        T = st.number_input("Time (years)", value=0.25)
-        r = st.number_input("Rate", value=0.03)
-        sigma = st.number_input("Vol", value=0.20)
-        quantity = st.number_input("Quantity", value=1.0)
-        option_type = st.selectbox("Type", ["Call", "Put"])
-        name = st.text_input("Name", value="Position")
-        
-        if st.form_submit_button("Add Position"):
-            from src.black_scholes import BlackScholes
-            opt = BlackScholes(S, K, T, r, sigma, q=0.0)
-            portfolio.add_position(opt, quantity, option_type, name)
-            st.success(f"Added {quantity} {option_type} {name}")
-    
-    if len(portfolio.positions) > 0:
-        st.subheader("Portfolio Positions")
-        pos_df = pd.DataFrame(portfolio.positions)
-        st.dataframe(pos_df)
-        
-        st.subheader("Net Greeks")
-        net_delta = portfolio.net_delta()
-        net_gamma = portfolio.net_gamma()
-        net_vega = portfolio.net_vega()
-        net_theta = portfolio.net_theta()
-        
-        greeks_df = pd.DataFrame({
-            "Greek": ["Net Delta", "Net Gamma", "Net Vega", "Net Theta"],
-            "Value": [net_delta, net_gamma, net_vega, net_theta]
-        })
-        st.dataframe(greeks_df, hide_index=True)
+    positions = [
+        (S3 * 1.00, 0.25, 10.0,  "call", "Long ATM Call"),
+        (S3 * 1.05, 0.25, -5.0,  "call", "Short OTM Call"),
+        (S3 * 0.95, 0.25,  8.0,  "put",  "Long OTM Put"),
+        (S3 * 1.00, 0.25, -3.0,  "put",  "Short ATM Put"),
+        (S3 * 0.98, 0.50,  6.0,  "call", "Call Spread Buy"),
+        (S3 * 1.08, 0.50, -6.0,  "call", "Call Spread Sell"),
+        (S3 * 0.92, 0.50,  5.0,  "put",  "Put Spread Buy"),
+        (S3 * 1.02, 0.50, -5.0,  "put",  "Put Spread Sell"),
+        (S3 * 1.00, 0.10,  4.0,  "call", "Straddle Call"),
+        (S3 * 1.00, 0.10,  4.0,  "put",  "Straddle Put"),
+        (S3 * 1.10, 0.75, -2.0,  "call", "Short Naked Call"),
+        (S3 * 1.00, 0.25, -8.0,  "call", "Short Straddle Call"),
+        (S3 * 1.00, 0.25, -8.0,  "put",  "Short Straddle Put"),
+    ]
 
-# ========== TAB 5: STRESS TESTING ==========
-with tab[4]:
-    st.header("Stress Testing & Scenario Analysis")
-    
-    from src.stress_testing import StressTester
-    from src.portfolio import OptionsPortfolio
-    from src.black_scholes import BlackScholes
-    
-    if st.button("Run Historical Stress Tests"):
-        portfolio = OptionsPortfolio()
-        S = 100.0
-        sigma = 0.20
-        
-        # Add sample positions
-        opt = BlackScholes(S, S*1.0, 0.25, 0.03, sigma, q=0.0)
-        portfolio.add_position(opt, 10.0, "call", "Long ATM Call")
-        opt = BlackScholes(S, S*0.95, 0.25, 0.03, sigma, q=0.0)
-        portfolio.add_position(opt, 8.0, "put", "Long OTM Put")
-        
-        tester = StressTester(portfolio, S, sigma)
+    for K, T, qty, otype, name in positions:
+        opt = BlackScholes(S3, K, T, r3, sigma3, q=0.0)
+        portfolio.add_position(opt, qty, otype, name)
+
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Net Delta", f"{portfolio.net_delta():.4f}")
+    col2.metric("Net Gamma", f"{portfolio.net_gamma():.4f}")
+    col3.metric("Net Vega",  f"{portfolio.net_vega():.2f}")
+    col4.metric("Net Theta", f"{portfolio.net_theta():.2f}")
+
+    risk_report = portfolio.risk_report()
+    st.subheader("Position-by-Position Greeks")
+    numeric_cols = [c for c in risk_report.columns if c not in ['name','option_type']]
+    risk_report[numeric_cols] = risk_report[numeric_cols].round(4)
+    st.dataframe(risk_report, hide_index=True)
+
+# ── TAB 4: STRESS TESTING ─────────────────────────────────────────────────────
+with tabs[3]:
+    st.header("Historical Stress Testing")
+
+    S4     = st.number_input("Spot", value=741.75, step=1.0, key="s4")
+    sigma4 = st.number_input("Volatility", value=0.17, step=0.01, key="sig4")
+
+    # Reuse same portfolio
+    portfolio4 = OptionsPortfolio()
+    for K, T, qty, otype, name in positions:
+        opt = BlackScholes(S4, K * (S4/S3), T, 0.03, sigma4, q=0.0)
+        portfolio4.add_position(opt, qty, otype, name)
+
+    tester = StressTester(portfolio4, S4, sigma4)
+
+    if st.button("Run Stress Tests"):
         results = tester.historical_scenarios()
-        
-        st.subheader("Stress Test Results")
-        st.dataframe(results, hide_index=True)
+        results['estimated_pnl'] = results['estimated_pnl'].round(2)
 
-# ========== TAB 6: DELTA-HEDGING ==========
-with tab[5]:
+        st.subheader("Scenario Results")
+        def color_pnl(val):
+            if isinstance(val, float):
+                color = 'background-color: lightgreen' if val > 0 else 'background-color: lightcoral'
+                return color
+            return ''
+
+        st.dataframe(
+            results.style.applymap(color_pnl, subset=['estimated_pnl']),
+            hide_index=True
+        )
+
+        # Stress surface heatmap
+        stress_surface = tester.stress_surface()
+        stress_surface['spot_move_pct'] = stress_surface['spot_move_pct'].round(3)
+        stress_surface['vol_move_pct']  = stress_surface['vol_move_pct'].round(3)
+        heatmap_data = stress_surface.pivot(
+            index='spot_move_pct', columns='vol_move_pct', values='pnl')
+
+        import seaborn as sns
+        x_labels = [f'{v:.0%}' for v in heatmap_data.columns]
+        y_labels  = [f'{v:.0%}' for v in heatmap_data.index]
+
+        fig, ax = plt.subplots(figsize=(14, 8))
+        sns.heatmap(heatmap_data, cmap='RdBu_r', center=0, annot=False,
+                    ax=ax, xticklabels=x_labels, yticklabels=y_labels)
+        ax.set_xlabel('Volatility Move (%)', fontsize=11)
+        ax.set_ylabel('Spot Move (%)', fontsize=11)
+        ax.set_title('Stress Test P&L Heatmap\n(Blue=Profit, Red=Loss)', fontsize=13)
+        ax.tick_params(axis='x', rotation=45, labelsize=8)
+        ax.tick_params(axis='y', rotation=0,  labelsize=8)
+        plt.tight_layout()
+        st.pyplot(fig)
+        plt.close(fig)
+
+# ── TAB 5: DELTA HEDGING ──────────────────────────────────────────────────────
+with tabs[4]:
     st.header("Delta-Hedging Simulation")
-    
-    with st.sidebar:
-        rebalance_freq = st.radio("Rebalance Frequency", ["Daily", "Weekly", "Monthly"])
-        n_paths = st.number_input("Paths", value=1000, min_value=100)
-    
-    freq_map = {"Daily": 1/252, "Weekly": 5/252, "Monthly": 21/252}
-    
-    if st.button("Run Hedging Simulation"):
-        st.info(f"Running {rebalance_freq} rebalancing with {n_paths} paths...")
-        st.success("Simulation complete!")
-        st.markdown("**Hedging Error** increases with less frequent rebalancing due to Gamma risk.")
+    st.markdown("Simulate delta-hedging a short call and measure hedging error across rebalancing frequencies")
 
-# ========== TAB 7: HESTON MODEL ==========
-with tab[6]:
-    st.header("Heston Stochastic Volatility Model")
-    st.markdown("Calibrate Heston parameters to market IV surface")
-    
-    if st.button("Calibrate Heston"):
-        st.info("Running calibration... This may take 5-15 minutes.")
-        st.success("Calibration complete!")
-        st.markdown("**Calibrated Parameters:** κ=2.0, θ=0.04, ξ=0.3, ρ=-0.7, v₀=0.04")
-        st.markdown("**Heston produces volatility smile endogenously!**")
+    col1, col2 = st.columns([1, 2])
 
-# ========== FOOTER ==========
+    with col1:
+        S5     = st.number_input("Spot",   value=741.75, step=1.0,  key="s5")
+        K5     = st.number_input("Strike", value=741.75, step=1.0,  key="k5")
+        T5     = st.number_input("Expiry (years)", value=0.50, step=0.01, key="t5")
+        r5     = st.number_input("Rate",   value=0.03, step=0.001, key="r5")
+        sig5   = st.number_input("Vol",    value=0.17, step=0.01,  key="sig5")
+        npaths = st.number_input("Simulated Paths", value=500, min_value=100,
+                                 max_value=2000, step=100, key="np5")
+
+    with col2:
+        if st.button("Run Hedging Simulation"):
+            from src.hedging import DeltaHedgingSimulator
+
+            with st.spinner("Simulating... this takes ~30 seconds"):
+                results_dict = {}
+                freq_map = {"Daily": 1/252, "Weekly": 5/252, "Monthly": 21/252}
+
+                for freq_name, dt_hedge in freq_map.items():
+                    hedger = DeltaHedgingSimulator(
+                        BlackScholes(S5, K5, T5, r5, sig5, q=0.0),
+                        n_paths=int(npaths),
+                        transaction_cost_bps=5
+                    )
+                    pnl = hedger.run(rebalance_step=dt_hedge)
+                    results_dict[freq_name] = pnl
+
+            freq_labels = list(results_dict.keys())
+            stds  = [results_dict[f].std()  for f in freq_labels]
+            means = [results_dict[f].mean() for f in freq_labels]
+
+            m1, m2, m3 = st.columns(3)
+            m1.metric("Daily Std P&L",   f"${stds[0]:.2f}")
+            m2.metric("Weekly Std P&L",  f"${stds[1]:.2f}")
+            m3.metric("Monthly Std P&L", f"${stds[2]:.2f}")
+
+            fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+            colors = ['steelblue', 'darkorange', 'green']
+            for i, (freq, color) in enumerate(zip(freq_labels, colors)):
+                pnl = results_dict[freq]
+                axes[i].hist(pnl, bins=40, color=color, alpha=0.8, edgecolor='white')
+                axes[i].axvline(pnl.mean(), color='red', linestyle='--', lw=2,
+                                label=f'Mean={pnl.mean():.2f}')
+                axes[i].set_title(f'{freq} Rebalancing')
+                axes[i].set_xlabel('P&L')
+                axes[i].set_ylabel('Frequency')
+                axes[i].legend(fontsize=9)
+                axes[i].grid(True, alpha=0.3)
+
+            plt.tight_layout()
+            st.pyplot(fig)
+            plt.close(fig)
+
+            st.markdown(f"""
+            **Key insight:** Monthly rebalancing has **{stds[2]/stds[0]:.0f}× wider** P&L dispersion 
+            than daily — this is Gamma risk accumulating between hedges.
+            """)
+
+# ── FOOTER ────────────────────────────────────────────────────────────────────
 st.markdown("---")
-st.markdown("Built with Black-Scholes, Monte Carlo, and Heston models")
+st.markdown("Built with Black-Scholes, Monte Carlo, GBM, and Heston models | Data: yfinance")
