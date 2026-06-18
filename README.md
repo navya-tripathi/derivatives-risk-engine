@@ -16,7 +16,7 @@ An end-to-end derivatives pricing and risk management system built from scratch 
 | GBM Simulation | Historical SPY kurtosis vs GBM | 11.04 vs 2.97 |
 | Monte Carlo | Pricing error vs Black-Scholes at 100k paths | 0.19% |
 | Asian Options | Price discount vs vanilla (same strike) | 55.9% cheaper |
-| Barrier Parity | Knock-out + Knock-in = Vanilla | ✅ Holds exactly |
+| Barrier Parity | Knock-out + Knock-in = Vanilla |  Holds exactly |
 | IV Surface | ATM implied vol (SPY, June 2026) | 10.6% |
 | IV Surface | OTM put vol premium over ATM | +11.6 vol points |
 | Delta Hedging | Std P&L: Daily vs Monthly rebalancing | $2.67 vs $11.89 (346% wider) |
