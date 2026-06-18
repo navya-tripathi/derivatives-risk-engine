@@ -5,7 +5,7 @@
 
 ## Overview
 
-An end-to-end derivatives pricing and risk management system built from scratch in Python, designed to mirror the analytical infrastructure of a sell-side options desk. The project covers the full workflow from stochastic price simulation through exotic options pricing, Greeks computation, implied volatility surface construction from live market data, portfolio-level risk aggregation, delta-hedging simulation, and historical stress testing — deployed as an interactive Streamlit dashboard.
+An end-to-end derivatives pricing and risk management system built from scratch in Python, designed to mirror the analytical infrastructure of a sell-side options desk. The project covers the full workflow from stochastic price simulation through exotic options pricing, Greeks computation, implied volatility surface construction from live market data, portfolio-level risk aggregation, delta-hedging simulation, and historical stress testing, deployed as an interactive Streamlit dashboard.
 
 ---
 
@@ -32,28 +32,28 @@ Implemented a flexible GBM simulator using the exact discretization scheme:
 
 S(t+dt) = S(t) × exp((μ - 0.5σ²)dt + σ√dt × Z)
 
-Simulated 10,000 paths for SPY with historically estimated parameters (μ = 12.5%, σ = 17.1%). Empirically validated where GBM breaks down by comparing simulated and historical return distributions: historical SPY returns exhibit kurtosis of 11.04 versus GBM's theoretical 3.0 — nearly 4× the tail risk. QQ plot confirms systematic deviation at both tails, motivating the Heston stochastic volatility extension.
+Simulated 10,000 paths for SPY with historically estimated parameters (μ = 12.5%, σ = 17.1%). Empirically validated where GBM breaks down by comparing simulated and historical return distributions: historical SPY returns exhibit kurtosis of 11.04 versus GBM's theoretical 3.0, nearly 4× the tail risk. The QQ plot confirms systematic deviation at both tails, motivating the Heston stochastic volatility extension.
 
 ### 2. Monte Carlo Option Pricing
-Built a Monte Carlo pricer for European, Asian, and Barrier options under the risk-neutral measure. Key implementation detail: paths simulated with drift μ = r - q (risk-free rate minus dividend yield), not historical drift — ensuring consistency with Black-Scholes pricing. At 100,000 simulations, MC price converges to Black-Scholes with 0.19% error.
+Built a Monte Carlo pricer for European, Asian, and Barrier options under the risk-neutral measure. Key implementation detail: paths simulated with drift μ = r - q (risk-free rate minus dividend yield), not historical drift ensuring consistency with Black-Scholes pricing. At 100,000 simulations, MC price converges to Black-Scholes with 0.19% error.
 
 Exotic options priced:
-- **Asian calls:** Average price over path life — 55.9% cheaper than vanilla at same strike due to averaging reducing effective payoff volatility
+- **Asian calls:** Average price over path life was 55.9% cheaper than vanilla at same strike due to averaging reducing effective payoff volatility
 - **Barrier knock-out/knock-in:** Parity relationship (knock-out + knock-in = vanilla) verified exactly, confirming implementation correctness
 
 ### 3. Black-Scholes Greeks
 Complete analytical implementation of all first and second-order Greeks: Delta, Gamma, Vega, Theta, Rho, Vanna, Volga. Plotted as 3D surfaces over (spot, time-to-expiry) space. Key findings:
 
-- Gamma spikes to 0.031 near expiry and ATM — the "dangerous zone" for market makers
-- Theta reaches -264 per day for near-expiry ATM options — dramatic time decay
-- Vanna and Volga second-order cross-Greeks computed and visualized — used in practice for hedging volatility exposure
+- Gamma spikes to 0.031 near expiry and ATM which is the "dangerous zone" for market makers
+- Theta reaches -264 per day for near-expiry ATM options showing dramatic time decay
+- Vanna and Volga second-order cross-Greeks computed and visualized as used in practice for hedging volatility exposure
 
 ### 4. Implied Volatility Surface
 Constructed a live implied volatility surface from real SPY options chain data via yfinance. Used Newton-Raphson root-finding to back out implied volatility from market option prices. Applied liquidity filters: minimum bid > $0.05, maximum bid-ask spread < 50%, OTM options only (puts below spot, calls above spot).
 
 Key findings from June 2026 SPY options:
-- ATM implied vol: **10.6%** — consistent with recent realized volatility
-- OTM put implied vol: **22.6%** — reflecting the crash risk premium
+- ATM implied vol: **10.6%** which is consistent with recent realized volatility
+- OTM put implied vol: **22.6%** reflecting the crash risk premium
 - The volatility skew (higher IV for OTM puts) is the market's correction for GBM's failure to price tail risk
 
 Heston stochastic volatility model calibrated to market IV surface. Calibration requires options spanning multiple maturities (1 month to 2 years) for reliable parameter identification; near-term weekly options do not provide sufficient term structure to distinguish the model's five parameters. This is a known limitation of short-dated option chains, not a limitation of the implementation.
@@ -77,7 +77,7 @@ Simulated delta-hedging a short call position across 1,000 GBM paths at three re
 | Weekly | -$0.80 | $5.82 | [-$11.11, +$8.53] |
 | Monthly | -$0.64 | $11.89 | [-$20.56, +$18.09] |
 
-Monthly rebalancing has 346% wider P&L dispersion than daily — directly quantifying the Gamma risk that accumulates between hedges. Daily rebalancing has the most negative mean P&L due to higher transaction costs, demonstrating that perfect hedging is not cost-free even in the GBM world.
+Monthly rebalancing has 346% wider P&L dispersion than daily therefore directly quantifying the Gamma risk that accumulates between hedges. Daily rebalancing has the most negative mean P&L due to higher transaction costs, demonstrating that perfect hedging is not cost-free even in the GBM world.
 
 ### 7. Historical Stress Testing with Greek Attribution
 Ran the portfolio through five named historical stress scenarios, decomposing P&L into Delta, Gamma, and Vega contributions:
@@ -90,13 +90,13 @@ Ran the portfolio through five named historical stress scenarios, decomposing P&
 | Dot-com Bust | -15% | +80% | -$640 | Mixed Vega/Delta |
 | Soft Landing | +20% | -30% | +$1,106 | Delta gain + Vega gain |
 
-The portfolio is short volatility — it profits when markets rise and volatility falls, and loses in crash scenarios where volatility spikes overwhelm the Gamma convexity benefit.
+The portfolio is short volatility, so it profits when markets rise and volatility falls, and loses in crash scenarios where volatility spikes overwhelm the Gamma convexity benefit.
 
 ---
 
 ## Limitations & Honest Assessment
 
-**GBM assumptions:** GBM assumes constant volatility and normally distributed returns. Real SPY returns have kurtosis of 11 versus GBM's theoretical 3 — fat tails and volatility clustering are not captured. All pricing and hedging results assume the GBM world.
+**GBM assumptions:** GBM assumes constant volatility and normally distributed returns. Real SPY returns have kurtosis of 11 versus GBM's theoretical 3, fat tails and volatility clustering are not captured. All pricing and hedging results assume the GBM world.
 
 **Delta-hedging costs:** All hedging simulations assume zero bid-ask spread and no market impact. Real hedging costs would increase the negative mean P&L at all rebalancing frequencies.
 
